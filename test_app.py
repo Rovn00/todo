@@ -15,7 +15,8 @@ class AppTest(unittest.TestCase):
             db.execute('DELETE FROM tasks')
 
     def test_tasks(self):
-        self.assertEqual(self.client.get('/').status_code, 200)
+        with self.client.get('/') as response:
+            self.assertEqual(response.status_code, 200)
         self.assertEqual(self.client.get('/health').json, {'status': 'ok'})
         response = self.client.post('/api/items', json={'text': 'Сделать задание'})
         self.assertEqual(response.status_code, 201)
