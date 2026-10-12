@@ -1,0 +1,23 @@
+name: CI
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Test application
+        run: python -m unittest -v
+      - name: Build image
+        run: docker build -t todo .
+      - name: Test container
+        run: |
+          docker run -d --name todo -p 8000:8000 todo
+          trap 'docker logs todo; docker rm -f todo' EXIT
+          curl --fail --retry 10 --retry-connrefused --retry-delay 1 http://localhost:8000/health

@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Список задач</title>
+    <style>
+        body {
+            max-width: 500px;
+            margin: 60px auto;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+            background: #f4f4f4;
+        }
+        input, button {
+            padding: 10px;
+            font-size: 16px;
+        }
+        input {
+            width: 60%;
+        }
+        li {
+            margin: 12px 0;
+            overflow-wrap: anywhere;
+        }
+        li button {
+            margin-left: 10px;
+        }
+        #error {
+            color: #b00020;
+        }
+    </style>
+</head>
+<body>
+    <h1>Список задач</h1>
+    <form id="form">
+        <input id="text" placeholder="Новая задача" aria-label="Новая задача" maxlength="200" required>
+        <button type="submit">Добавить</button>
+    </form>
+    <p id="error" role="alert"></p>
+    <ul id="list"></ul>
+
+    <script>
+        const form = document.getElementById('form');
+        const input = document.getElementById('text');
+        const list = document.getElementById('list');
+        const error = document.getElementById('error');
+
+        async function request(url, options) {
+            const response = await fetch(url, options);
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.error || 'Ошибка запроса');
+            }
+            return data;
+        }
+
+        async function loadTasks() {
+            const tasks = await request('/api/items');
+            list.replaceChildren();
+            for (const task of tasks) {
+                const item = document.createElement('li');
+                item.textContent = task.text;
+                const button = document.createElement('button');
+                button.textContent = 'Удалить';
+                button.onclick = async () => {
+                    try {
+                        await request('/api/items/' + task.id, { method: 'DELETE' });
+                        await loadTasks();
+                        error.textContent = '';
+                    } catch (e) {
+                        error.textContent = e.message;
+                    }
+                };
+                item.appendChild(button);
+                list.appendChild(item);
+            }
+        }
+
+        form.onsubmit = async (event) => {
+            event.preventDefault();
+            try {
+                await request('/api/items', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: input.value })
+                });
+                input.value = '';
+                await loadTasks();
+                error.textContent = '';
+            } catch (e) {
+                error.textContent = e.message;
+            }
+        };
+
+        loadTasks().catch(e => error.textContent = e.message);
+    </script>
+</body>
+</html>
