@@ -1,20 +1,66 @@
+name: student-todo
 services:
   app:
     build: .
     ports:
-      - "${PORT:-8000}:8000"
+      - "127.0.0.1:${PORT:-8000}:8000"
     environment:
       PORT: 8000
-      DB_PATH: /data/tasks.db
-    volumes:
-      - tasks:/data
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-todo}
+      DB_USER: ${DB_USER:-todo}
+      DB_PASSWORD: ${DB_PASSWORD:?Run ./manage.sh init first}
+    depends_on:
+      db:
+        condition: service_healthy
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=4)"]
       interval: 10s
       timeout: 5s
       retries: 3
-      start_period: 5s
+      start_period: 10s
+
+  db:
+    image: postgres:17.6-alpine
+    environment:
+      POSTGRES_DB: ${DB_NAME:-todo}
+      POSTGRES_USER: ${DB_USER:-todo}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Run ./manage.sh init first}
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./chart/files/prometheus.yaml:/etc/prometheus/prometheus.yml:ro
+      - prometheus:/prometheus
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:12.2.0
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:?Run ./manage.sh init first}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana:/var/lib/grafana
+      - ./chart/files/datasource.yaml:/etc/grafana/provisioning/datasources/todo.yaml:ro
+      - ./chart/files/provider.yaml:/etc/grafana/provisioning/dashboards/todo.yaml:ro
+      - ./chart/files/dashboard.json:/var/lib/grafana/dashboards/todo.json:ro
+    restart: unless-stopped
 
 volumes:
-  tasks:
+  postgres:
+  prometheus:
+  grafana:

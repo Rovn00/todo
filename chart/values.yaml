@@ -1,0 +1,15 @@
+image:
+  repository: todo
+  tag: local
+  pullPolicy: IfNotPresent
+  pullSecrets: []
+app:
+  port: 8000
+  dbName: todo
+  dbUser: todo
+postgresImage: postgres:17.6-alpine
+secretName: todo-secrets
+monitoring:
+  enabled: true
+  prometheusImage: prom/prometheus:v3.5.0
+  grafanaImage: grafana/grafana:12.2.0

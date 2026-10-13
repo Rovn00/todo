@@ -1,23 +1,146 @@
-name: CI
-on: [push, pull_request, workflow_dispatch]
+name: CI and Deploy
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: Deploy to the configured Kubernetes cluster
+        type: boolean
+        default: false
 permissions:
   contents: read
+concurrency:
+  group: todo-${{ github.ref }}
+  cancel-in-progress: false
 jobs:
   check:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17.6-alpine
+        env:
+          POSTGRES_DB: todo_test
+          POSTGRES_USER: todo
+          POSTGRES_PASSWORD: ci-only-password
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U todo -d todo_test"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      DB_HOST: localhost
+      DB_NAME: todo_test
+      DB_USER: todo
+      DB_PASSWORD: ci-only-password
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - name: Install dependencies
-        run: pip install -r requirements.txt
       - name: Test application
-        run: python -m unittest -v
-      - name: Build image
-        run: docker build -t todo .
-      - name: Test container
         run: |
-          docker run -d --name todo -p 8000:8000 todo
+          pip install -r requirements.txt
+          python -m unittest -v
+      - name: Install Helm and kind
+        run: |
+          curl -fsSL https://get.helm.sh/helm-v3.19.0-linux-amd64.tar.gz | tar -xz
+          sudo mv linux-amd64/helm /usr/local/bin/helm
+          curl -fsSL https://kind.sigs.k8s.io/dl/v0.33.0/kind-linux-amd64 -o kind
+          chmod +x kind
+          sudo mv kind /usr/local/bin/kind
+      - name: Check Helm and build image
+        run: |
+          helm lint ./chart
+          helm template todo ./chart > /tmp/todo.yaml
+          docker build -t todo:ci .
+      - name: Check HTTP in Docker
+        run: |
+          docker run -d --name todo --network host -e DB_HOST -e DB_NAME -e DB_USER -e DB_PASSWORD todo:ci
           trap 'docker logs todo; docker rm -f todo' EXIT
-          curl --fail --retry 10 --retry-connrefused --retry-delay 1 http://localhost:8000/health
+          curl --fail --retry 15 --retry-connrefused --retry-delay 1 http://localhost:8000/health
+          curl --fail http://localhost:8000/metrics
+      - name: Check deployment in Kubernetes
+        run: |
+          kind create cluster --name todo --wait 120s
+          kind load docker-image todo:ci --name todo
+          kubectl create namespace todo
+          kubectl -n todo create secret generic todo-secrets --from-literal=DB_PASSWORD=ci-only-password --from-literal=GRAFANA_PASSWORD=ci-only-password
+          helm upgrade --install todo ./chart -n todo --set image.tag=ci --set monitoring.enabled=false --wait --timeout 5m
+          kubectl -n todo exec deployment/app -- python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"
+      - name: Show Kubernetes diagnostics
+        if: failure()
+        run: |
+          kubectl -n todo get pods
+          kubectl -n todo get events --sort-by=.metadata.creationTimestamp
+          kubectl -n todo logs deployment/app --all-containers=true --tail=100 || true
+      - name: Delete CI cluster
+        if: always()
+        run: kind delete cluster --name todo
+
+  publish:
+    needs: check
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.image.outputs.name }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - name: Image name
+        id: image
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/metadata-action@v5
+        id: metadata
+        with:
+          images: ${{ steps.image.outputs.name }}
+          tags: |
+            type=raw,value=sha-${{ github.sha }}
+            type=ref,event=tag
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.metadata.outputs.tags }}
+
+  deploy:
+    needs: publish
+    if: github.event_name == 'workflow_dispatch' && inputs.deploy && github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, todo]
+    environment: production
+    env:
+      DEPLOY_KUBECONFIG: ${{ secrets.KUBE_CONFIG }}
+      DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+      GRAFANA_PASSWORD: ${{ secrets.GRAFANA_PASSWORD }}
+      GHCR_READ_TOKEN: ${{ secrets.GHCR_READ_TOKEN }}
+      REGISTRY_USER: ${{ github.repository_owner }}
+      IMAGE: ${{ needs.publish.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy published image
+        shell: bash
+        run: |
+          set -eu
+          test -n "$DEPLOY_KUBECONFIG"
+          test -n "$DB_PASSWORD"
+          test -n "$GRAFANA_PASSWORD"
+          test -n "$GHCR_READ_TOKEN"
+          export KUBECONFIG="$RUNNER_TEMP/todo-kubeconfig"
+          trap 'rm -f "$KUBECONFIG"' EXIT
+          umask 077
+          printf '%s' "$DEPLOY_KUBECONFIG" > "$KUBECONFIG"
+          kubectl create namespace todo --dry-run=client -o yaml | kubectl apply -f -
+          kubectl -n todo create secret generic todo-secrets --from-literal=DB_PASSWORD="$DB_PASSWORD" --from-literal=GRAFANA_PASSWORD="$GRAFANA_PASSWORD" --dry-run=client -o yaml | kubectl apply -f -
+          kubectl -n todo create secret docker-registry ghcr-creds --docker-server=ghcr.io --docker-username="$REGISTRY_USER" --docker-password="$GHCR_READ_TOKEN" --dry-run=client -o yaml | kubectl apply -f -
+          helm upgrade --install todo ./chart -n todo --set "image.repository=$IMAGE" --set "image.tag=sha-$GITHUB_SHA" --set 'image.pullSecrets[0].name=ghcr-creds' --wait --timeout 10m
+          kubectl -n todo rollout status deployment/app --timeout=120s
+          kubectl -n todo exec deployment/app -- python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"

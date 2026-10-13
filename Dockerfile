@@ -3,8 +3,7 @@ WORKDIR /app
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 COPY app.py index.html ./
-RUN mkdir /data && chown -R 10001:10001 /data /app
 USER 10001:10001
-ENV PORT=8000 DB_PATH=/data/tasks.db PYTHONUNBUFFERED=1
+ENV PORT=8000 PYTHONUNBUFFERED=1
 EXPOSE 8000
-CMD ["python", "app.py"]
+CMD ["sh", "-c", "exec gunicorn --bind 0.0.0.0:${PORT} --workers 1 --threads 4 --timeout 120 --graceful-timeout 10 --access-logfile - --error-logfile - app:app"]
