@@ -14,8 +14,9 @@
 
 Задание разрешает выбрать несколько задач для уровня 3. Loki, Terraform, Ansible,
 Argo CD и уведомления не входят в выбранные задачи.
-Реальные запуски GitHub Actions, публикация в GHCR и удалённый deployment требуют
-репозитория GitHub и подключения runner. Наличие workflow само по себе не является
+Репозиторий: https://github.com/Rovn00/todo
+Первый успешный CI с публикацией образа: https://github.com/Rovn00/todo/actions/runs/38365963629
+Для deployment через GitHub ещё требуется подключить self-hosted runner и настроить Secrets. Наличие workflow само по себе не является
 доказательством успешного CI: на защите нужна настоящая история Actions.
 
 ## Быстрый запуск: Docker Compose
@@ -206,12 +207,12 @@ Git tag v1.0.0 дополнительно даёт tag образа v1.0.0.
 Для настоящих запусков создать репозиторий на GitHub и отправить код:
 
 ```bash
-git remote add origin https://github.com/USERNAME/REPOSITORY.git
+git remote add origin https://github.com/Rovn00/todo.git
 git push -u origin main
 ```
 
 Во вкладке Actions показать успешно завершившиеся check и publish.
-Образ появится в Packages по адресу ghcr.io/username/repository.
+Образ публикуется в Packages по адресу ghcr.io/rovn00/todo.
 Публикация использует автоматический GITHUB_TOKEN, его не нужно записывать в Git.
 
 Для deployment добавить self-hosted runner с меткой todo через Settings → Actions → Runners.
@@ -361,4 +362,6 @@ PVC PostgreSQL сохранён намеренно. Его удаление `kub
 - Зависание worker: событие «Container app failed liveness probe, will be restarted» — получено.
 - Изменение порта через ConfigMap/Helm и возврат порта — прошли.
 - Grafana dashboard, связь datasource с Prometheus, метрики запросов, ошибок и времени — проверены в обеих средах.
-- GitHub Actions, публикация GHCR и deployment через GitHub ещё не запускались: нужен GitHub-репозиторий и подключённый runner.
+- GitHub Actions: check и publish успешно выполнены в запуске https://github.com/Rovn00/todo/actions/runs/38365963629.
+- Образ опубликован в ghcr.io/rovn00/todo с tag sha-7739972056f9090b4fd28a7c320e673477e0ff6f.
+- Deployment через GitHub ещё не выполнялся: требуется подключить runner и настроить Secrets.
