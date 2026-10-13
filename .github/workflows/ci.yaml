@@ -116,6 +116,7 @@ jobs:
     needs: publish
     if: github.event_name == 'workflow_dispatch' && inputs.deploy && github.ref == 'refs/heads/main'
     runs-on: [self-hosted, todo]
+    timeout-minutes: 15
     environment: production
     permissions:
       contents: read
@@ -133,6 +134,9 @@ jobs:
         shell: bash
         run: |
           set -eu
+          if command -v caffeinate >/dev/null; then
+            caffeinate -i -w "$$" &
+          fi
           test -n "$DEPLOY_KUBECONFIG"
           test -n "$DB_PASSWORD"
           test -n "$GRAFANA_PASSWORD"
