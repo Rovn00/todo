@@ -50,13 +50,18 @@ PY
     kind load docker-image "todo:$tag" --name todo
     "$0" secrets
     helm upgrade --install todo ./chart -n todo \
-      --set "image.tag=$tag" --wait --timeout 10m
+      --set image.repository=todo --set "image.tag=$tag" --set image.pullPolicy=IfNotPresent --wait --timeout 10m
+    ;;
+  runner)
+    test -x .local/runner/run.sh || { echo "Runner не установлен в .local/runner"; exit 1; }
+    cd .local/runner
+    exec ./run.sh
     ;;
   status)
     export KUBECONFIG="${KUBECONFIG:-$PWD/.local/kubeconfig}"
     kubectl -n todo get pods,svc,pvc
     ;;
   *)
-    echo './manage.sh init | up | down | cluster | secrets | deploy | status'
+    echo './manage.sh init | up | down | cluster | secrets | deploy | runner | status'
     ;;
 esac

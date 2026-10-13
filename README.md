@@ -16,7 +16,7 @@
 Argo CD и уведомления не входят в выбранные задачи.
 Репозиторий: https://github.com/Rovn00/todo
 Первый успешный CI с публикацией образа: https://github.com/Rovn00/todo/actions/runs/38365963629
-Для deployment через GitHub ещё требуется подключить self-hosted runner и настроить Secrets. Наличие workflow само по себе не является
+Deployment через GitHub выполняется runner на этом Mac. Для запуска runner: `./manage.sh runner`. Наличие workflow само по себе не является
 доказательством успешного CI: на защите нужна настоящая история Actions.
 
 ## Быстрый запуск: Docker Compose
@@ -216,7 +216,7 @@ git push -u origin main
 Публикация использует автоматический GITHUB_TOKEN, его не нужно записывать в Git.
 
 Для deployment добавить self-hosted runner с меткой todo через Settings → Actions → Runners.
-Runner должен иметь kubectl и helm в PATH, доступ к кластеру и доступ к GHCR.
+Runner должен иметь Docker, kubectl, kind и Helm в PATH, доступ к локальному кластеру todo и доступ к GHCR.
 Для локального kind runner работает на том же компьютере; он должен быть включён
 в момент ручного запуска. Обычный GitHub-hosted runner не может обратиться к localhost твоего Mac.
 
@@ -227,16 +227,24 @@ Runner должен иметь kubectl и helm в PATH, доступ к клас
 | KUBE_CONFIG | Содержимое .local/kubeconfig для runner на этом компьютере |
 | DB_PASSWORD | Тот же пароль, что уже использует рабочая база |
 | GRAFANA_PASSWORD | Пароль Grafana |
-| GHCR_READ_TOKEN | Токен с read:packages для чтения приватного пакета GHCR |
 
-Репозиторий и package должны давать владельцу токена право чтения. Для чужой организации
-может понадобиться её сервисный аккаунт вместо github.repository_owner в workflow.
+Для чтения GHCR используется временный GITHUB_TOKEN с packages:read.
+Отдельный постоянный токен GHCR не нужен. После скачивания образ загружается в kind,
+поэтому новый Pod запускается из локального кэша. Это deployment именно в локальный kind-кластер todo.
 Не менять пароль существующей PostgreSQL просто обновлением Secret.
+Runner выполняет deploy только при ручном запуске на main после успешных check и publish.
+Job pull request работает на GitHub-hosted runner.
 Runner должен работать только с доверенным кодом этого репозитория.
 
+На этом Mac runner установлен в .local/runner и запускается командой `./manage.sh runner`.
+Оставить этот терминал открытым; остановка — Ctrl+C. После перезагрузки компьютера runner надо запустить снова.
+Его служебные учётные данные исключены из Git вместе со всей папкой .local.
+
 Actions → CI and Deploy → Run workflow → branch main → deploy=true.
-Workflow проверяет и публикует образ, затем создаёт Secret для imagePull,
-выполняет helm upgrade и ждёт /health. Историю deployment показать в Actions и `helm history todo -n todo`.
+Workflow проверяет и публикует образ, затем скачивает его из GHCR, загружает в kind,
+обновляет Secret приложения, выполняет helm upgrade --atomic и ждёт /health.
+Временная конфигурация входа в GHCR удаляется после job. При неудаче Helm откатывает обновление.
+При создании нового кластера образ надо загрузить снова запуском deployment. Историю deployment показать в Actions и `helm history todo -n todo`.
 Если runner не подключён, deploy будет ждать в очереди — это не успешный deployment.
 
 ## Сценарии защиты
@@ -364,4 +372,4 @@ PVC PostgreSQL сохранён намеренно. Его удаление `kub
 - Grafana dashboard, связь datasource с Prometheus, метрики запросов, ошибок и времени — проверены в обеих средах.
 - GitHub Actions: check и publish успешно выполнены в запуске https://github.com/Rovn00/todo/actions/runs/38365963629.
 - Образ опубликован в ghcr.io/rovn00/todo с tag sha-7739972056f9090b4fd28a7c320e673477e0ff6f.
-- Deployment через GitHub ещё не выполнялся: требуется подключить runner и настроить Secrets.
+- Deployment через GitHub: runner и Secrets настроены; результат реального запуска проверяется в Actions.
